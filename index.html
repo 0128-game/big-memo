@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>馬鹿広いメモ帳</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            background-color: #1e1e1e;
+            overflow: hidden;
+        }
+        /* 画面いっぱいの広大な入力欄 */
+        #notepad {
+            width: 100%;
+            height: 100%;
+            border: none;
+            outline: none;
+            background-color: #1e1e1e;
+            color: #ffffff;
+            padding: 20px;
+            resize: none;
+            font-family: sans-serif;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            display: block;
+            /* 初期フォントサイズ（自動調整されるためベースとなる大きさ） */
+            font-size: 16px; 
+        }
+    </style>
+</head>
+<body>
+
+    <textarea id="notepad" placeholder="ここに無限に書き込む..."></textarea>
+
+    <script>
+        const notepad = document.getElementById('notepad');
+        const STORAGE_KEY = 'mega_notepad_content';
+
+        // 1. ローカルストレージからデータを読み込み
+        const savedContent = localStorage.getItem(STORAGE_KEY);
+        if (savedContent !== null) {
+            notepad.value = savedContent;
+        }
+
+        // 2. 文字サイズを自動調整する関数（スクロールバーが出ないように縮小）
+        function adjustFontSize() {
+            const maxFontSize = 40; // 最大文字サイズ (px)
+            const minFontSize = 8;  // 最小文字サイズ (px)
+            
+            let currentSize = maxFontSize;
+            notepad.style.fontSize = currentSize + 'px';
+
+            // テキストが画面に収まる（スクロールが発生しない）までサイズを下げる
+            while (
+                (notepad.scrollHeight > notepad.clientHeight || notepad.scrollWidth > notepad.clientWidth) 
+                && currentSize > minFontSize
+            ) {
+                currentSize -= 0.5; // 0.5pxずつ滑らかに縮小
+                notepad.style.fontSize = currentSize + 'px';
+            }
+        }
+
+        // 3. 入力時のイベントリスナー（保存 ＆ サイズ調整）
+        notepad.addEventListener('input', () => {
+            // ローカルストレージに自動保存
+            localStorage.setItem(STORAGE_KEY, notepad.value);
+            // サイズ調整
+            adjustFontSize();
+        });
+
+        // 4. 画面サイズが変更された時にも文字サイズを再調整
+        window.addEventListener('resize', adjustFontSize);
+
+        // 初回読み込み時に実行
+        adjustFontSize();
+    </script>
+</body>
+</html>
