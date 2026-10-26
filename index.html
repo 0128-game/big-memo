@@ -116,6 +116,29 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
 #map button.full{background:var(--muted)}
 #map button.here{background:var(--accent)}
 
+/* 共有ダイアログ */
+#shareBtn{padding:0 14px;cursor:pointer;font-size:13px;font-weight:700}
+#modal{position:absolute;inset:0;z-index:10;display:grid;place-items:center;padding:16px;background:rgba(10,12,18,.45)}
+#modal[hidden]{display:none}
+#mbox{width:min(560px,100%);max-height:100%;overflow:auto;padding:22px;background:var(--sheet);color:var(--ink);
+  border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+#mbox h2{font-size:18px;margin-bottom:6px}
+.mnote{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:14px}
+.mwarn{font-size:12px;color:var(--accent);line-height:1.5}
+#slink{width:100%;height:38px;padding:0 10px;border:1px solid var(--line);border-radius:9px;background:var(--chip);
+  font-family:var(--mono);font-size:12px;outline:none;color:var(--ink)}
+.mact{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;flex-wrap:wrap}
+.mact .btn{height:36px;padding:0 14px}
+.btn.ghost{background:var(--chip);color:var(--ink)}
+.pv{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+.pvt{font-weight:700;font-size:16px;margin-bottom:6px}
+.pvb{font-family:var(--mono);font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:38vh;overflow:auto;margin:0}
+.mimp{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.mimp label{display:flex;align-items:center;gap:4px}
+.mimp input{width:56px;height:30px;border:1px solid var(--line);border-radius:7px;background:var(--sheet);
+  text-align:center;font-family:var(--mono);font-size:13px;outline:none;color:var(--ink)}
+.mimp input:focus{border-color:var(--accent)}
+
 @media (max-width:880px){
   #toolbar{left:10px;right:10px;top:10px;flex-wrap:wrap}
   .search{flex:1 1 200px}
@@ -126,7 +149,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   #nav{opacity:.8;right:10px;bottom:10px}
   #results{left:0;right:0;width:auto;top:auto;margin-top:6px;position:absolute;top:100%}
 }
-@media (min-width:881px){ .sh-head{--reserve:560px} }
+@media (min-width:881px){ .sh-head{--reserve:640px} }
 @media (min-width:600px) and (max-width:880px){ .sh-head{padding-top:64px} }
 @media (prefers-reduced-motion:reduce){ #world{transition:none!important} .sheet.flash .coord{animation:none} }
 </style>
@@ -151,6 +174,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
       <button class="btn" id="jgo">移動</button>
     </div>
     <button class="pill" id="fontBtn" title="フォント切り替え（Ctrl+Q）" aria-label="フォント切り替え">Aa</button>
+    <button class="pill" id="shareBtn" title="表示中のシートを共有">共有</button>
     <div id="results" hidden></div>
   </div>
 
@@ -158,6 +182,8 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
     <div id="pos"></div>
     <div id="map" aria-label="周辺のシート"></div>
   </div>
+
+  <div id="modal" hidden><div id="mbox" role="dialog" aria-modal="true"></div></div>
 </div>
 
 <script>
@@ -543,9 +569,126 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   }
   fontBtn.addEventListener('click', toggleFont);
 
+  /* ---------- 共有（リンクにシートを埋め込む） ---------- */
+  // 共有リンクの行き先（公開ページ）
+  const SHARE_URL = 'https://claude.ai/artifact/ML79ypZ25rAQC2eBiJL2nU';
+  const modal = $('#modal'), mBox = $('#mbox');
+  const b64u = bytes => {
+    let s = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+  const unb64u = str => {
+    str = str.replace(/-/g, '+').replace(/_/g, '/');
+    while (str.length % 4) str += '=';
+    const bin = atob(str), u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  };
+  async function pipe(bytes, Stream) {
+    const st = new Blob([bytes]).stream().pipeThrough(new Stream('deflate-raw'));
+    return new Uint8Array(await new Response(st).arrayBuffer());
+  }
+  async function encodeSheet(d) {
+    const raw = new TextEncoder().encode(JSON.stringify(d));
+    if ('CompressionStream' in window) { try { return 's' + b64u(await pipe(raw, CompressionStream)); } catch (e) {} }
+    return 'u' + b64u(raw);
+  }
+  async function decodeSheet(tok) {
+    const kind = tok[0], bytes = unb64u(tok.slice(1));
+    const raw = kind === 's' ? await pipe(bytes, DecompressionStream) : kind === 'u' ? bytes : null;
+    if (!raw) throw new Error('bad');
+    const d = JSON.parse(new TextDecoder().decode(raw));
+    if (typeof d.t !== 'string' || typeof d.b !== 'string') throw new Error('bad');
+    return d;
+  }
+  function fmtDate(t) {
+    const x = new Date(t), p = n => String(n).padStart(2, '0');
+    return `${x.getFullYear()}/${p(x.getMonth() + 1)}/${p(x.getDate())} ${p(x.getHours())}:${p(x.getMinutes())}`;
+  }
+  function openModal(html) {
+    hideResults();
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    mBox.innerHTML = html; modal.hidden = false;
+  }
+  function closeModal() { modal.hidden = true; mBox.innerHTML = ''; }
+  modal.addEventListener('pointerdown', e => { if (e.target === modal) closeModal(); });
+  mBox.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeModal(); });
+
+  async function shareCurrent() {
+    const s = sheets[key(cur.r, cur.c)];
+    if (!s) {
+      openModal(`<h2>このシートは空です</h2><p class="mnote">タイトルか本文を書いてから共有してください。</p><div class="mact"><button class="btn" data-close>閉じる</button></div>`);
+      return;
+    }
+    const url = SHARE_URL + '#m1' + await encodeSheet({ t: s.t, b: s.b, r: cur.r, c: cur.c, u: s.u });
+    openModal(
+      `<h2>${cur.r}行 ${cur.c}列を共有</h2>` +
+      `<p class="mnote">このリンクを開いた人には、このシートの今の内容だけが表示されます。後で編集しても相手側には反映されません。</p>` +
+      `<input id="slink" readonly value="${esc(url)}" aria-label="共有リンク">` +
+      (url.length > 8000 ? `<p class="mwarn" style="margin-top:8px">本文が長いためリンクがとても長くなっています。送り先のアプリによっては途中で切れることがあります。</p>` : '') +
+      `<div class="mact">${navigator.share ? '<button class="btn ghost" id="snative">他のアプリで送る</button>' : ''}` +
+      `<button class="btn" id="scopy">リンクをコピー</button></div>`
+    );
+    const inp = $('#slink');
+    inp.addEventListener('focus', () => inp.select());
+    $('#scopy').onclick = async () => {
+      let ok = false;
+      try { await navigator.clipboard.writeText(url); ok = true; }
+      catch (e) { inp.focus(); inp.select(); try { ok = document.execCommand('copy'); } catch (_) {} }
+      $('#scopy').textContent = ok ? 'コピーしました' : 'リンクを選択しました。手動でコピーしてください';
+    };
+    const n = $('#snative');
+    if (n) n.onclick = () => navigator.share({ title: s.t || 'メモ', url }).catch(() => {});
+  }
+  $('#shareBtn').addEventListener('click', shareCurrent);
+
+  function clearHash() {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+  }
+  async function handleHash() {
+    const tok = decodeURIComponent(location.hash.slice(1));
+    if (!tok.startsWith('m1')) return;
+    clearHash();
+    let d;
+    try { d = await decodeSheet(tok.slice(2)); }
+    catch (e) {
+      openModal(`<h2>共有リンクを読み込めませんでした</h2><p class="mnote">リンクが途中で切れている可能性があります。送ってくれた人に、リンク全体をもう一度送ってもらってください。</p><div class="mact"><button class="btn" data-close>閉じる</button></div>`);
+      return;
+    }
+    let tc = cur.c;
+    while (sheets[key(cur.r, tc)] && tc < MAX) tc++;
+    const from = Number.isInteger(d.r) && Number.isInteger(d.c) ? `送り主の ${d.r}行 ${d.c}列 のシート` : '共有されたシート';
+    openModal(
+      `<h2>共有されたシート</h2>` +
+      `<p class="mnote">${from}${typeof d.u === 'number' ? `（${fmtDate(d.u)} 時点の内容）` : ''}</p>` +
+      `<div class="pv"><div class="pvt">${d.t ? esc(d.t) : '<span style="opacity:.55">無題</span>'}</div><pre class="pvb">${esc(d.b)}</pre></div>` +
+      `<div class="mimp">取り込み先 <label>行<input id="ir" inputmode="numeric" value="${cur.r}"></label>` +
+      `<label>列<input id="ic" inputmode="numeric" value="${tc}"></label><span id="iwarn" class="mwarn"></span></div>` +
+      `<div class="mact"><button class="btn ghost" data-close>取り込まない</button><button class="btn" id="iok">自分のメモに取り込む</button></div>`
+    );
+    const ir = $('#ir'), ic = $('#ic'), warn = $('#iwarn');
+    const check = () => {
+      const r = parseInt(ir.value, 10), c = parseInt(ic.value, 10);
+      const okv = r >= MIN && r <= MAX && c >= MIN && c <= MAX;
+      warn.textContent = !okv ? '1〜9999 の番号を入れてください' : sheets[key(r, c)] ? 'このシートには内容があり、上書きされます' : '';
+      return okv ? { r, c } : null;
+    };
+    ir.oninput = ic.oninput = check; check();
+    $('#iok').onclick = () => {
+      const p = check(); if (!p) return;
+      sheets[key(p.r, p.c)] = { t: d.t, b: d.b, u: Date.now() };
+      const o = pool.get(key(p.r, p.c));
+      if (o) { o.title.value = d.t; o.body.value = d.b; fit(o.body); setUpd(o); }
+      saveNow(); closeModal(); goTo(p.r, p.c); drawMap();
+    };
+  }
+  addEventListener('hashchange', handleHash);
+
   /* ---------- キーボード ---------- */
   addEventListener('keydown', e => {
     const k = e.key.toLowerCase();
+    if (!modal.hidden) { if (e.key === 'Escape') closeModal(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'q') { e.preventDefault(); toggleFont(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'k') { e.preventDefault(); qEl.focus(); qEl.select(); return; }
     if (e.key === 'Escape') { hideResults(); document.activeElement?.blur(); return; }
@@ -559,7 +702,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   /* ---------- 起動 ---------- */
   addEventListener('resize', () => { measure(); render(); pool.forEach(o => fit(o.body)); });
   setInterval(() => pool.forEach(setUpd), 30000);
-  applyFont(); measure(); render();
+  applyFont(); measure(); render(); handleHash();
   document.fonts?.ready.then(() => pool.forEach(o => fit(o.body)));
 })();
 </script>
