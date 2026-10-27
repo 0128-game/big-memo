@@ -116,6 +116,10 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
 #map button.full{background:var(--muted)}
 #map button.here{background:var(--accent)}
 
+/* ブラックスクリーン */
+#black{position:fixed;inset:0;z-index:100;background:#000;cursor:none}
+#black[hidden]{display:none}
+
 /* 共有ダイアログ */
 #shareBtn{padding:0 14px;cursor:pointer;font-size:13px;font-weight:700}
 #modal{position:absolute;inset:0;z-index:10;display:grid;place-items:center;padding:16px;background:rgba(10,12,18,.45)}
@@ -184,6 +188,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   </div>
 
   <div id="modal" hidden><div id="mbox" role="dialog" aria-modal="true"></div></div>
+  <div id="black" hidden></div>
 </div>
 
 <script>
@@ -570,8 +575,12 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   fontBtn.addEventListener('click', toggleFont);
 
   /* ---------- 共有（リンクにシートを埋め込む） ---------- */
-  // 共有リンクの行き先（公開ページ）
-  const SHARE_URL = 'https://0128-game.github.io/big-memo/';
+  // 共有リンクの行き先。空のままなら、このページ自身のURL（GitHub Pages など）を使う。
+  // ローカルファイルからも共有したい場合は、公開URLをここに書く（例: 'https://ユーザー名.github.io/リポジトリ名/'）
+  const SHARE_BASE = 'https://0128-game.github.io/big-memo/';
+  const SHARE_URL = SHARE_BASE ||
+    (/claude/.test(location.hostname) ? 'https://claude.ai/artifact/ML79ypZ25rAQC2eBiJL2nU'
+      : /^https?:$/.test(location.protocol) ? location.origin + location.pathname : '');
   const modal = $('#modal'), mBox = $('#mbox');
   const b64u = bytes => {
     let s = '';
@@ -619,6 +628,10 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
     const s = sheets[key(cur.r, cur.c)];
     if (!s) {
       openModal(`<h2>このシートは空です</h2><p class="mnote">タイトルか本文を書いてから共有してください。</p><div class="mact"><button class="btn" data-close>閉じる</button></div>`);
+      return;
+    }
+    if (!SHARE_URL) {
+      openModal(`<h2>このままでは共有リンクを作れません</h2><p class="mnote">ファイルを直接開いているため、相手が開けるURLがありません。公開しているURL（GitHub Pages など）から開くか、ファイル内の SHARE_BASE に公開URLを書いてください。</p><div class="mact"><button class="btn" data-close>閉じる</button></div>`);
       return;
     }
     const url = SHARE_URL + '#m1' + await encodeSheet({ t: s.t, b: s.b, r: cur.r, c: cur.c, u: s.u });
@@ -685,9 +698,27 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   }
   addEventListener('hashchange', handleHash);
 
+  /* ---------- ブラックスクリーン ---------- */
+  const black = $('#black');
+  let lastFocus = null;
+  function toggleBlack() {
+    if (black.hidden) {
+      lastFocus = document.activeElement;
+      if (lastFocus && lastFocus.blur) lastFocus.blur(); // 見えない状態で文字が入らないように
+      hideResults();
+      black.hidden = false;
+    } else {
+      black.hidden = true;
+      if (lastFocus && lastFocus !== document.body && document.contains(lastFocus)) lastFocus.focus({ preventScroll: true });
+    }
+  }
+  black.addEventListener('dblclick', toggleBlack); // スマホなどはダブルタップで解除
+
   /* ---------- キーボード ---------- */
   addEventListener('keydown', e => {
     const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === 'b') { e.preventDefault(); toggleBlack(); return; }
+    if (!black.hidden) { e.preventDefault(); if (e.key === 'Escape') toggleBlack(); return; }
     if (!modal.hidden) { if (e.key === 'Escape') closeModal(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'q') { e.preventDefault(); toggleFont(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'k') { e.preventDefault(); qEl.focus(); qEl.select(); return; }
