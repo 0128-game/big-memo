@@ -699,26 +699,40 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   addEventListener('hashchange', handleHash);
 
   /* ---------- ブラックスクリーン ---------- */
+  // blackMode: 'off' | 'black'（入力も止める）| 'type'（黒いまま文字を打てる）
   const black = $('#black');
-  let lastFocus = null;
-  function toggleBlack() {
-    if (black.hidden) {
-      lastFocus = document.activeElement;
-      if (lastFocus && lastFocus.blur) lastFocus.blur(); // 見えない状態で文字が入らないように
-      hideResults();
-      black.hidden = false;
-    } else {
-      black.hidden = true;
+  let lastFocus = null, blackMode = 'off';
+  function setBlack(mode) {
+    if (mode === blackMode) mode = 'off';
+    if (mode === 'off') {
+      black.hidden = true; blackMode = 'off';
       if (lastFocus && lastFocus !== document.body && document.contains(lastFocus)) lastFocus.focus({ preventScroll: true });
+      return;
     }
+    if (blackMode === 'off') lastFocus = document.activeElement;
+    hideResults();
+    if (mode === 'black') {
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); // 見えない状態で文字が入らないように
+    } else {
+      // 入力中の欄がなければ、表示中シートの本文末尾にカーソルを置く
+      const a = lastFocus;
+      const o = pool.get(key(cur.r, cur.c));
+      const inSheet = a && o && o.el.contains(a);
+      if (inSheet) a.focus({ preventScroll: true });
+      else if (o) { o.body.focus({ preventScroll: true }); const n = o.body.value.length; o.body.setSelectionRange(n, n); }
+    }
+    blackMode = mode; black.hidden = false;
   }
+  const toggleBlack = () => setBlack('off');
+  black.addEventListener('pointerdown', e => e.preventDefault()); // クリックで入力欄のフォーカスが外れないように
   black.addEventListener('dblclick', toggleBlack); // スマホなどはダブルタップで解除
 
   /* ---------- キーボード ---------- */
   addEventListener('keydown', e => {
     const k = e.key.toLowerCase();
-    if ((e.ctrlKey || e.metaKey) && k === 'b') { e.preventDefault(); toggleBlack(); return; }
-    if (!black.hidden) { e.preventDefault(); if (e.key === 'Escape') toggleBlack(); return; }
+    if ((e.ctrlKey || e.metaKey) && k === 'b') { e.preventDefault(); setBlack(e.shiftKey ? 'type' : 'black'); return; }
+    if (blackMode === 'black') { e.preventDefault(); if (e.key === 'Escape') toggleBlack(); return; }
+    if (blackMode === 'type') { if (e.key === 'Escape') { e.preventDefault(); toggleBlack(); } return; }
     if (!modal.hidden) { if (e.key === 'Escape') closeModal(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'q') { e.preventDefault(); toggleFont(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'k') { e.preventDefault(); qEl.focus(); qEl.select(); return; }
