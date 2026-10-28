@@ -63,6 +63,7 @@ button,input,select,textarea{font:inherit;color:inherit}
   padding:10px 30px 30px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;overflow:hidden;
   font-family:var(--mono);color:var(--ink)}
 #stage.sans .body{font-family:var(--sans)}
+#stage.tiny .title{font-size:7px}
 .body::placeholder{color:var(--muted);opacity:.5}
 
 /* ツールバー */
@@ -242,9 +243,9 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   /* ---------- 文字サイズ自動調整 ---------- */
   function fit(ta) {
     if (!ta.clientHeight) return;
-    if (!ta.value) { ta.style.fontSize = '24px'; return; }
+    if (!ta.value) { ta.style.fontSize = db.tiny ? '5px' : '24px'; return; }
     const ok = () => ta.scrollHeight <= ta.clientHeight && ta.scrollWidth <= ta.clientWidth;
-    let lo = 2, hi = 60;
+    let lo = 2, hi = db.tiny ? 5 : 60; // 極小モードは 5px が上限
     ta.style.fontSize = hi + 'px';
     if (ok()) return;
     while (hi - lo > 0.5) {
@@ -566,6 +567,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   /* ---------- フォント切り替え ---------- */
   function applyFont() {
     stage.classList.toggle('sans', db.font === 'sans');
+    stage.classList.toggle('tiny', !!db.tiny);
     fontBtn.style.fontFamily = db.font === 'sans' ? 'var(--sans)' : 'var(--mono)';
   }
   function toggleFont() {
@@ -573,6 +575,10 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
     applyFont(); pool.forEach(o => fit(o.body)); save();
   }
   fontBtn.addEventListener('click', toggleFont);
+  function toggleTiny() {
+    db.tiny = !db.tiny;
+    applyFont(); pool.forEach(o => fit(o.body)); save();
+  }
 
   /* ---------- 共有（リンクにシートを埋め込む） ---------- */
   // 共有リンクの行き先。空のままなら、このページ自身のURL（GitHub Pages など）を使う。
@@ -731,6 +737,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   addEventListener('keydown', e => {
     const k = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && k === 'b') { e.preventDefault(); setBlack(e.shiftKey ? 'type' : 'black'); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && k === 'm') { e.preventDefault(); toggleTiny(); return; }
     if (blackMode === 'black') { e.preventDefault(); if (e.key === 'Escape') toggleBlack(); return; }
     if (blackMode === 'type') { if (e.key === 'Escape') { e.preventDefault(); toggleBlack(); } return; }
     if (!modal.hidden) { if (e.key === 'Escape') closeModal(); return; }
