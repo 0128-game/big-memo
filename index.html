@@ -63,7 +63,8 @@ button,input,select,textarea{font:inherit;color:inherit}
   padding:10px 30px 30px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;overflow:hidden;
   font-family:var(--mono);color:var(--ink)}
 #stage.sans .body{font-family:var(--sans)}
-#stage.tiny .title{font-size:7px}
+#stage.locked .sheet:not([inert]) .body{overflow-y:auto;touch-action:pan-y;overscroll-behavior:contain;line-height:1.6}
+#pos .lk{color:var(--accent);font-weight:700;margin-right:8px}
 .body::placeholder{color:var(--muted);opacity:.5}
 
 /* ツールバー */
@@ -242,10 +243,15 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
 
   /* ---------- 文字サイズ自動調整 ---------- */
   function fit(ta) {
+    // 固定モード中の表示シートは、読みやすい固定サイズ＋スクロール
+    if (db.lock) {
+      const o = pool.get(key(cur.r, cur.c));
+      if (o && o.body === ta) { ta.style.fontSize = (innerWidth < 600 ? 18 : 22) + 'px'; return; }
+    }
     if (!ta.clientHeight) return;
-    if (!ta.value) { ta.style.fontSize = db.tiny ? '5px' : '24px'; return; }
+    if (!ta.value) { ta.style.fontSize = '24px'; return; }
     const ok = () => ta.scrollHeight <= ta.clientHeight && ta.scrollWidth <= ta.clientWidth;
-    let lo = 2, hi = db.tiny ? 5 : 60; // 極小モードは 5px が上限
+    let lo = 2, hi = 60;
     ta.style.fontSize = hi + 'px';
     if (ok()) return;
     while (hi - lo > 0.5) {
@@ -267,6 +273,10 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
     o.upd.textContent = s ? '編集 ' + rel(s.u) : '';
   }
 
+  const PH_NORMAL = 'ここに無限に書き込む…\n\nスワイプ・ドラッグ・ホイールで隣のシートへ';
+  const PH_LOCKED = 'ここに無限に書き込む…';
+  const setPh = o => { o.body.placeholder = db.lock ? PH_LOCKED : PH_NORMAL; };
+
   function makeSheet(r, c) {
     const el = document.createElement('section');
     el.className = 'sheet';
@@ -279,6 +289,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
     const s = sheets[key(r, c)];
     o.title.value = s ? s.t : '';
     o.body.value = s ? s.b : '';
+    setPh(o);
     o.title.addEventListener('input', () => edit(o, 't', o.title.value));
     o.title.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); o.body.focus(); } });
     o.body.addEventListener('input', () => { edit(o, 'b', o.body.value); fit(o.body); });
@@ -340,7 +351,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   }
 
   function step(dr, dc) {
-    if (anim) return;
+    if (anim || db.lock) return;
     const r = cur.r + dr, c = cur.c + dc;
     if (r < MIN || c < MIN || r > MAX || c > MAX) {
       animateTo(-dc * 28, -dr * 28, () => animateTo(0, 0));
@@ -355,6 +366,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
 
   function goTo(r, c, sel) {
     r = clamp(r); c = clamp(c);
+    if (db.lock && (r !== cur.r || c !== cur.c)) setLock(false); // 検索や番号ジャンプで別シートへ行くときは固定を解除
     const dr = r - cur.r, dc = c - cur.c;
     const finish = () => {
       const o = pool.get(key(r, c));
@@ -381,7 +393,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   /* ---------- スワイプ／ドラッグ ---------- */
   let drag = null;
   stage.addEventListener('pointerdown', e => {
-    if (e.button !== 0 || anim) return;
+    if (e.button !== 0 || anim || db.lock) return;
     if (e.pointerType === 'mouse' && e.target.closest('textarea,input')) return; // マウスは文字選択を優先
     drag = { id: e.pointerId, x: e.clientX, y: e.clientY, axis: null, d: 0, v: 0, pd: 0, pt: performance.now(), focus: document.activeElement };
   });
@@ -431,7 +443,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   /* ---------- ホイール／トラックパッド ---------- */
   let wx = 0, wy = 0, wLock = 0, wT;
   stage.addEventListener('wheel', e => {
-    if (e.ctrlKey) return;
+    if (e.ctrlKey || db.lock) return; // 固定中はホイールで本文をスクロール
     e.preventDefault();
     const now = performance.now();
     if (now < wLock) { wLock = now + 180; return; } // 慣性スクロールの尾を無視
@@ -556,7 +568,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
       h += `<button class="${cls}" data-r="${r}" data-c="${c}" title="${esc(tip)}" aria-label="${esc(tip)}"></button>`;
     }
     mapEl.innerHTML = h;
-    posEl.innerHTML = `<b>${cur.r}</b>行 <b>${cur.c}</b>列`;
+    posEl.innerHTML = (db.lock ? '<span class="lk">固定中</span>' : '') + `<b>${cur.r}</b>行 <b>${cur.c}</b>列`;
     jr.placeholder = cur.r; jc.placeholder = cur.c;
   }
   mapEl.addEventListener('click', e => {
@@ -567,7 +579,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   /* ---------- フォント切り替え ---------- */
   function applyFont() {
     stage.classList.toggle('sans', db.font === 'sans');
-    stage.classList.toggle('tiny', !!db.tiny);
+    stage.classList.toggle('locked', !!db.lock);
     fontBtn.style.fontFamily = db.font === 'sans' ? 'var(--sans)' : 'var(--mono)';
   }
   function toggleFont() {
@@ -575,9 +587,12 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
     applyFont(); pool.forEach(o => fit(o.body)); save();
   }
   fontBtn.addEventListener('click', toggleFont);
-  function toggleTiny() {
-    db.tiny = !db.tiny;
-    applyFont(); pool.forEach(o => fit(o.body)); save();
+  function setLock(on) {
+    db.lock = on;
+    stage.classList.toggle('locked', on);
+    const o = pool.get(key(cur.r, cur.c));
+    if (o && !on) o.body.scrollTop = 0;
+    pool.forEach(x => { setPh(x); fit(x.body); }); drawMap(); save();
   }
 
   /* ---------- 共有（リンクにシートを埋め込む） ---------- */
@@ -737,7 +752,7 @@ mark{background:var(--mark);color:var(--ink);border-radius:3px;padding:0 1px}
   addEventListener('keydown', e => {
     const k = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && k === 'b') { e.preventDefault(); setBlack(e.shiftKey ? 'type' : 'black'); return; }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && k === 'm') { e.preventDefault(); toggleTiny(); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && k === 'm') { e.preventDefault(); setLock(!db.lock); return; }
     if (blackMode === 'black') { e.preventDefault(); if (e.key === 'Escape') toggleBlack(); return; }
     if (blackMode === 'type') { if (e.key === 'Escape') { e.preventDefault(); toggleBlack(); } return; }
     if (!modal.hidden) { if (e.key === 'Escape') closeModal(); return; }
